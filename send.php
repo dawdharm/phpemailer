@@ -59,6 +59,13 @@ try {
     $mail->msgHTML ($data['body']);
     $mail->AltBody  = strip_tags($data['body']);
 
+    if ($data['lead_id'] && $data['lead_id'] > 0) {
+        $mail->ConfirmReadingTo = $replyemail;
+        $mail->addCustomHeader('X-Confirm-Reading-To', $replyemail);
+        $mail->addCustomHeader('Return-Receipt-To', $replyemail);
+        $mail->addCustomHeader('Disposition-Notification-To', $replyemail);
+    }
+    
     if($data['attachments'] && is_array($data['attachments']) && count($data['attachments']) > 0){
         try {
         foreach($attachments as $attachment){
