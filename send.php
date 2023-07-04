@@ -59,7 +59,7 @@ try {
     $mail->msgHTML ($data['body']);
     $mail->AltBody  = strip_tags($data['body']);
     if($data['unsubscribe_header'] == 1){
-        $mail->addCustomHeader('List-Unsubscribe', "<mailto:{$replyemail}?subject=Unsubscribe>, <>");
+        $mail->addCustomHeader('List-Unsubscribe', "<mailto:{$replyemail}?subject=Unsubscribe>, <{$data['unsubscribe_url']}>");
     }
     if ($data['lead_id'] && $data['lead_id'] > 0) {
         $mail->ConfirmReadingTo = $replyemail;
