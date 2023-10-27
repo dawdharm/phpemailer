@@ -4,6 +4,26 @@ use PHPMailer\PHPMailer\PHPMailer;
 require("vendor/autoload.php");
 $data = json_decode( file_get_contents( 'php://input' ), true );
 
+//write server id to a json file
+if ( isset( $data['server_id'] ) ) {
+    if(file_exists('server_id.json')){
+        $fp = fopen('server_id.json', 'r');
+        $server = json_decode(fread($fp, filesize('server_id.json')), true);
+        fclose($fp);
+        $server_id = $server['server_id'];
+        if($server_id != $data['server_id']){
+            $fp = fopen('server_id.json', 'w');
+            fwrite($fp, json_encode(array('server_id' => $data['server_id'])));
+            fclose($fp);
+        }
+    }else{
+        $fp = fopen('server_id.json', 'w');
+        fwrite($fp, json_encode(array('server_id' => $data['server_id'])));
+        fclose($fp);
+    }
+}
+
+
 /**
  * @param $mail - PhpMailer object
  * @param $images - array with images to embed in email
