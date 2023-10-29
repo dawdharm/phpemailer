@@ -48,7 +48,14 @@ try {
     $mail->isSendmail();
     $replyemail = $data['reply_to'] != "" ? $data['reply_to'] : $data['from'];
     $mail->setFrom($data['from'], $data['from_name']);
-    $mail->addAddress($data['to'], $data['to_name']);     // Add a recipient
+    if ($data['to'] && is_array($data['to'])) {
+        foreach ($data['to'] as $to_addr) {
+            $mail->addAddress($to_addr['email'], $to_addr['name']);
+        }
+    } else if ($data['to']) {
+        $mail->addAddress($data['to'], $data['to_name']);
+    }
+    //$mail->addAddress($data['to'], $data['to_name']);     // Add a recipient
     $mail->addReplyTo($replyemail);
 
     if ($data['cc'] && is_array($data['cc'])) {
