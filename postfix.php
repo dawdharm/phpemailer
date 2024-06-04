@@ -53,8 +53,9 @@ echo "Last Size: ".$lastSize."\n";
 //Lock file
 echo $lockFile = __DIR__.'/mail.lock';
 echo "\n";
-if(file_exists($lockFile)){
-	echo "The program is running, please do not repeat the operation!\n";
+//If the lock file exists and the creation time is less than 30 minutes, the program is running
+if(file_exists($lockFile) && (time()-filemtime($lockFile))<1800){
+	echo "The program is already running\n";
 	exit;
 }
 touch($lockFile);
