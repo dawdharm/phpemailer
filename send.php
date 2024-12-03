@@ -1,111 +1,71 @@
 <?php
 
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
 use PHPMailer\PHPMailer\PHPMailer;
-use PHPMailer\PHPMailer\Exception;
-
-require 'PHPMailer/src/Exception.php';
-require 'PHPMailer/src/PHPMailer.php';
-require 'PHPMailer/src/SMTP.php';
-$data = json_decode(file_get_contents('php://input'), true);
+require("vendor/autoload.php");
+$data = json_decode( file_get_contents( 'php://input' ), true );
 
 $key = "QeThWmZq4t7w!z%C*F-JaNdRgUkXp2s5";
 $iv = "AeDhGkPn3q6t9w2z";
-
-function convert_to_embedded_images(&$mail, $images)
-{
-
-    foreach ($images as $image) {
+/**
+ * @param $mail - PhpMailer object
+ * @param $images - array with images to embed in email
+ * 
+ * @return void - sets embedded images in email
+ */
+function convert_to_embedded_images(&$mail, $images) {
+    foreach($images as $image) {
         $URL            = $image['src'];
         $img            = file_get_contents($URL);
-
-        // Get CURL to download the image to our local directory
-        //$curr_dir = basename(__DIR__); // e.g. /my/folder/location/
-        //$image_location = $curr_dir . $image['file_name'];
-
-        //$ch = curl_init($image['src']);
-        //$fp = fopen($image_location, 'wb');
-        //curl_setopt($ch, CURLOPT_FILE, $fp);
-        //curl_setopt($ch, CURLOPT_HEADER, 0);
-        //curl_exec($ch);
-        //curl_close($ch);
-        //fclose($fp);
-
-        //$mail->AddEmbeddedImage($image_location, $image['name']);
         $mail->addStringEmbeddedImage($img, $image['name'], $image['file_name'], 'base64', 'image/' . $image['type']);
     }
 }
 
-function clean_up_images(&$mail, $images) {
+/**
+ * setup PHPMailer object and send email
+ */
 
-    foreach($images as $image) {
-
-        // Delete image
-        $image_location = $curr_dir . $image['file_name'];
-
-        unlink($image_location);
-    }
-}
-
-$mail = new PHPMailer(true);                              // Passing `true` enables exceptions
+$mail = new PHPMailer(true);  // Passing `true` enables exceptions
 try {
-    //Server settings
-    // $mail->SMTPDebug = 2;                                 // Enable verbose debug output
-    $mail->isSendmail();                                      // Set mailer to use SMTP
-    //$mail->isSMTP();                                      // Set mailer to use SMTP
-    //$mail->Host = 'localhost';  // Specify main and backup SMTP servers
-    //$mail->SMTPAuth = false;                               // Enable SMTP authentication
-    //$mail->Username = '';                 // SMTP username
-    //$mail->Password = '';                           // SMTP password
-    //$mail->SMTPSecure = 'tls';                            // Enable TLS encryption, `ssl` also accepted
-    //$mail->Port = 25;                                    // TCP port to connect to
 
-    //Recipients
+    $mail->isSendmail();
+    $mail->CharSet = 'UTF-8';
+    $mail->Encoding = 'Quoted-Printable';
+    $mail->setLanguage('en', 'vendor/phpmailer/phpmailer/language/');
     $replyemail = $data['reply_to'] != "" ? $data['reply_to'] : $data['from'];
     $mail->setFrom($data['from'], $data['from_name']);
     $mail->addAddress($data['to'], $data['to_name']);     // Add a recipient
     $mail->addReplyTo($replyemail);
+
     if ($data['cc'] && is_array($data['cc'])) {
         foreach ($data['cc'] as $cc_addr) {
             $mail->AddCC($cc_addr);
         }
-    } else if ($data['cc']) {
+    }else if($data['cc']){
         $mail->AddCC($data['cc']);
     }
-    if ($data['bcc'] && is_array($data['bcc'])) {
+    
+    if ($data['bcc'] && is_array($data['cc'])) {
         foreach ($data['bcc'] as $bcc_addr) {
             $mail->AddBCC($bcc_addr);
         }
-    } else if ($data['bcc']) {
+    }else if($data['bcc']){
         $mail->AddBCC($data['bcc']);
     }
-    $mail->addCustomHeader('MIME-Version: 1.0');
-    //$mail->addCustomHeader('Content-type:text/html;');
-    $mail->ContentType = "multipart/mixed";
-
-    $mail->CharSet = "UTF-8";
-
     $mail->Sender = $data['bounce_address'];
-    $mail->XMailer = ' ';
-
-    // $mail->addCustomHeader('X-Mailer-Client', $data['client_id']);
-    // $mail->addCustomHeader('X-Mailer-Recp', $data['user_id']);
-    // $mail->addCustomHeader('X-Mailer-Camp', $data['campaign_id']);
+    $mail->XMailer = " ";
     $message_id = encrypt("{$data['client_id']}|{$data['user_id']}|{$data['campaign_id']}");
-    $hostname = gethostname();
-    //get hostname from $data['from']
     $hostname = explode("@", $data['from']);
     $hostname = $hostname[1];
-    // $mail->MessageID = base64_encode($message_id);
+    $mail->MessageID = "<{$message_id}@{$hostname}>";
     $mail->addCustomHeader('X-Mailer-DWXDID', $message_id);
-    // $mail->addCustomHeader('Message-ID', $data['message_id']);
-
-    //Content
-    $mail->isHTML(true);                                  // Set email format to HTML
+    #$mail->addCustomHeader('List-Unsubscribe', "<mailto:{$data['bounce_address']}?subject=Unsubscribe>");
     $mail->Subject  = $data['subject'];
-    $mail->msgHTML ($data['body']);
-    //$mail->AltBody  = strip_tags($data['body']);
+    $mail->msgHTML($data['body']);
+    $altBody = strip_tags($data['body']);
+    $altBody = preg_replace('/\n[\n\s]*\n/', "\n", $altBody);
+    $altBody = preg_replace('/\s\s+/', ' ', $altBody);
+    $altBody = htmlspecialchars_decode($altBody);
+    $mail->AltBody  = '';// PHPMailer::normalizeBreaks($altBody);
 
     if($data['attachments'] && is_array($data['attachments']) && count($data['attachments']) > 0){
         try {
@@ -116,7 +76,7 @@ try {
         }catch (Exception $e) {
         }
     }
-
+ 
     if ($data["is_embedded"] == true) {
         convert_to_embedded_images($mail, $data['images']);
     }
