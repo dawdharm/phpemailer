@@ -57,7 +57,7 @@ try {
     $hostname = explode("@", $data['from']);
     $hostname = $hostname[1];
     $mail->MessageID = "<{$message_id}@{$hostname}>";
-    $mail->addCustomHeader('X-Mailer-DWXDID', $message_id);
+    #$mail->addCustomHeader('X-Mailer-DWXDID', $message_id);
     #$mail->addCustomHeader('List-Unsubscribe', "<mailto:{$data['bounce_address']}?subject=Unsubscribe>");
     $mail->Subject  = $data['subject'];
     $mail->msgHTML($data['body']);
@@ -100,4 +100,5 @@ function decrypt($data)
     global $key, $iv;
     $data = base64_decode($data);
     return openssl_decrypt($data, 'AES-128-CBC', $key, 0, $iv);
+
 }
