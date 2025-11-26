@@ -1,11 +1,24 @@
 <?php
-//get server id from json file
-$server_id = 0;
-if(file_exists('server_id.json')){
-	$fp = fopen('server_id.json', 'r');
-	$server = json_decode(fread($fp, filesize('server_id.json')), true);
+//get domain id from json file
+$domain_id = 0;
+$domainIdFile = __DIR__.'/domain_id.json';
+if(file_exists($domainIdFile)){
+	$fp = fopen($domainIdFile, 'r');
+	$domain = json_decode(fread($fp, filesize($domainIdFile)), true);
 	fclose($fp);
-	$server_id = $server['server_id'];
+	$domain_id = $domain['domain_id'];
+}
+
+//get API URL from config file or use default production URL
+$apiUrl = 'https://46a204639ced.ngrok-free.app/postfix/log';
+$apiConfigFile = __DIR__.'/api_config.json';
+if(file_exists($apiConfigFile)){
+	$fp = fopen($apiConfigFile, 'r');
+	$apiConfig = json_decode(fread($fp, filesize($apiConfigFile)), true);
+	fclose($fp);
+	if(isset($apiConfig['api_url'])){
+		$apiUrl = $apiConfig['api_url'];
+	}
 }
 
 /**
@@ -90,9 +103,9 @@ while(!$hdLog->eof()){
 		preg_match('/(said|refused to talk to me):\s*(.*)$/',$content,$match);
 		$reason = isset($match[2])?$match[2]:'';
 		//Save the result
-		$ret = array('email'=>$email,'status'=>$status, 'dsn'=>$dsn, 'reason'=>$reason, 'relay'=>$relay, 'serverId'=>$server_id);
+		$ret = array('email'=>$email,'status'=>$status, 'dsn'=>$dsn, 'reason'=>$reason, 'relay'=>$relay, 'domainId'=>$domain_id);
 		//Post the result to the server
-		$ret = postData('https://api.pay-per-lead.co.uk/postfix/log',$ret);
+		$ret = postData($apiUrl,$ret);
 	}
 	$hdLog->next();
 }
