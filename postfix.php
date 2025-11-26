@@ -10,7 +10,7 @@ if(file_exists($domainIdFile)){
 }
 
 //get API URL from config file or use default production URL
-$apiUrl = 'https://cf1537b836ed.ngrok-free.app/postfix/log';
+$apiUrl = 'https://a28821c2dacd.ngrok-free.app/postfix/log';
 $apiConfigFile = __DIR__.'/api_config.json';
 if(file_exists($apiConfigFile)){
 	$fp = fopen($apiConfigFile, 'r');
