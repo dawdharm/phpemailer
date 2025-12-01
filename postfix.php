@@ -10,7 +10,7 @@ if(file_exists($domainIdFile)){
 }
 
 //get API URL from config file or use default production URL
-$apiUrl = 'http://payperlead.loc/postfix/log';
+$apiUrl = 'https://api.pay-per-lead.co.uk/postfix/log';
 $apiConfigFile = __DIR__.'/api_config.json';
 if(file_exists($apiConfigFile)){
 	$fp = fopen($apiConfigFile, 'r');
