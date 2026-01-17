@@ -72,21 +72,36 @@ if($fileSize <$lastSize){
 }
 echo "Last Position: ".$lastPos."\n";
 echo "Last Size: ".$lastSize."\n";
-//Lock file
+//Lock file with PID tracking
 echo $lockFile = __DIR__.'/mail.lock';
 echo "\n";
-//If the lock file exists and the creation time is less than 30 minutes, the program is running
+//Check if lock file exists and if the process is actually running
 if(file_exists($lockFile)){
 	$lockAge = time() - filemtime($lockFile);
-	if($lockAge < 1800){
-		echo "The program is already running (lock file age: ".$lockAge." seconds)\n";
+	$lockContent = file_get_contents($lockFile);
+	$lockPid = intval(trim($lockContent));
+
+	// Check if the process is actually running (Linux only)
+	$processRunning = false;
+	if($lockPid > 0 && file_exists("/proc/".$lockPid)){
+		$processRunning = true;
+	}
+
+	// If lock is less than 5 minutes old and process is running, exit
+	if($lockAge < 300 && $processRunning){
+		echo "The program is already running (PID: ".$lockPid.", lock file age: ".$lockAge." seconds)\n";
 		exit;
 	} else {
-		echo "Removing stale lock file (age: ".$lockAge." seconds)\n";
+		if(!$processRunning && $lockPid > 0){
+			echo "Removing stale lock file (PID: ".$lockPid." not running, age: ".$lockAge." seconds)\n";
+		} else {
+			echo "Removing expired lock file (age: ".$lockAge." seconds)\n";
+		}
 		unlink($lockFile);
 	}
 }
-touch($lockFile);
+// Write current process ID to lock file
+file_put_contents($lockFile, getmypid());
 
 // Track which rotated log files have been processed
 $processedRotatedLogsFile = __DIR__.'/processed_rotated_logs.json';
