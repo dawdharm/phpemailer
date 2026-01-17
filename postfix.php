@@ -49,7 +49,19 @@ $fileSize = filesize($logFile);
 //cache filesize for next time
 echo $remFile  = __DIR__.'/mail.rem';
 
-echo "File Size: ".$fileSize."\n";
+// Check if rem file directory is writable
+if(!is_writable(__DIR__)){
+	echo "\nError: Directory ".__DIR__." is not writable. Cannot create tracking files.\n";
+	exit(1);
+}
+
+// If rem file exists, check if it's writable
+if(file_exists($remFile) && !is_writable($remFile)){
+	echo "\nError: File ".$remFile." is not writable. Please check permissions.\n";
+	exit(1);
+}
+
+echo "\nFile Size: ".$fileSize."\n";
 //Get the size and read position of the last memory log file
 $lastSize = 0;
 $lastPos  = 0;
@@ -57,12 +69,21 @@ if(file_exists($remFile)){
 	$hd = fopen($remFile,'r+');
 	$str = fread($hd,1024);
 	$arr = explode(',',$str);
-	$lastSize = $arr[0];
-	$lastPos  = $arr[1];
+	$lastSize = isset($arr[0]) ? $arr[0] : 0;
+	$lastPos  = isset($arr[1]) ? $arr[1] : 0;
 	fclose($hd);
+} else {
+	// If rem file doesn't exist, start reading current log from beginning
+	echo "Rem file not found - will read current mail.log from position 0\n";
+	$lastSize = 0;
+	$lastPos = 0;
 }
 // open the rem file in overwrite mode
 $hd = fopen($remFile,'w+');
+if(!$hd){
+	echo "\nError: Cannot create/open rem file ".$remFile."\n";
+	exit(1);
+}
 //If the log file is truncated, the read position is reset to 0
 if($fileSize <$lastSize){
 	echo "The log file is truncated, the read position is reset to 0\n";
@@ -107,6 +128,12 @@ file_put_contents($lockFile, getmypid());
 $processedRotatedLogsFile = __DIR__.'/processed_rotated_logs.json';
 $processedRotatedLogs = array();
 if(file_exists($processedRotatedLogsFile)){
+	// Check if file is writable
+	if(!is_writable($processedRotatedLogsFile)){
+		echo "\nError: File ".$processedRotatedLogsFile." is not writable. Please check permissions.\n";
+		unlink($lockFile);
+		exit(1);
+	}
 	$content = file_get_contents($processedRotatedLogsFile);
 	$processedRotatedLogs = json_decode($content, true);
 	if(!is_array($processedRotatedLogs)){
@@ -114,35 +141,38 @@ if(file_exists($processedRotatedLogsFile)){
 	}
 }
 
-// If this is the first run (no position saved), process rotated log files
-if($lastPos == 0 && $lastSize == 0){
-	echo "First run detected - processing rotated log files\n";
+// If processed_rotated_logs.json doesn't exist, reset and process all rotated log files from scratch
+if(!file_exists($processedRotatedLogsFile)){
+	echo "========================================\n";
+	echo "FRESH START: Tracking file not found\n";
+	echo "Resetting and processing all rotated log files from scratch\n";
+	echo "========================================\n";
 	$rotatedFiles = getRotatedLogFiles($logFile);
 
 	if(count($rotatedFiles) > 0){
-		echo "Found ".count($rotatedFiles)." rotated log files\n";
+		echo "Found ".count($rotatedFiles)." rotated log files to process\n";
 		// Process from oldest to newest (reverse the array)
 		$rotatedFiles = array_reverse($rotatedFiles);
 
 		foreach($rotatedFiles as $rotatedFile){
 			$fileKey = basename($rotatedFile['path']);
-			// Only process if not already processed
-			if(!isset($processedRotatedLogs[$fileKey])){
-				processLogFile($rotatedFile['path'], $rotatedFile['compressed'], $apiUrl, $domain_id);
-				// Mark as processed
-				$processedRotatedLogs[$fileKey] = array(
-					'processed_at' => date('Y-m-d H:i:s'),
-					'file_path' => $rotatedFile['path']
-				);
-				// Save processed logs tracking file
-				file_put_contents($processedRotatedLogsFile, json_encode($processedRotatedLogs, JSON_PRETTY_PRINT));
-			} else {
-				echo "Skipping already processed file: ".$rotatedFile['path']."\n";
-			}
+			// Process the file (no need to check if already processed since we're starting fresh)
+			processLogFile($rotatedFile['path'], $rotatedFile['compressed'], $apiUrl, $domain_id);
+			// Mark as processed
+			$processedRotatedLogs[$fileKey] = array(
+				'processed_at' => date('Y-m-d H:i:s'),
+				'file_path' => $rotatedFile['path']
+			);
+			// Save processed logs tracking file after each file
+			file_put_contents($processedRotatedLogsFile, json_encode($processedRotatedLogs, JSON_PRETTY_PRINT));
 		}
+		echo "Completed processing ".count($rotatedFiles)." rotated log files\n";
 	} else {
-		echo "No rotated log files found\n";
+		echo "No rotated log files found - creating empty tracking file\n";
+		// Create empty tracking file
+		file_put_contents($processedRotatedLogsFile, json_encode(array(), JSON_PRETTY_PRINT));
 	}
+	echo "========================================\n";
 }
 
 //Open the log file
@@ -202,15 +232,15 @@ function getRotatedLogFiles($baseLogFile){
 		$file = $dir.'/'.$baseName.'.'.$i;
 		$gzFile = $file.'.gz';
 
-		if(file_exists($file)){
-			$rotatedFiles[] = array('path' => $file, 'number' => $i, 'compressed' => false);
-		}
+		// Prefer .gz file if both exist (avoid processing same log twice)
 		if(file_exists($gzFile)){
 			$rotatedFiles[] = array('path' => $gzFile, 'number' => $i, 'compressed' => true);
+		} elseif(file_exists($file)){
+			$rotatedFiles[] = array('path' => $file, 'number' => $i, 'compressed' => false);
 		}
 	}
 
-	// Sort by number in descending order (newest first)
+	// Sort by number in ascending order (oldest first, will be reversed later)
 	usort($rotatedFiles, function($a, $b){
 		return $a['number'] - $b['number'];
 	});
@@ -277,6 +307,33 @@ function processLogLine($content, $domain_id){
 	// Look for bounce email log
 	if(preg_match('/status=(bounced|deferred)/',$content)){
 		echo $content."\n";
+
+		//Get the timestamp from the log line (format: Jan 17 14:30:45)
+		$logDate = '';
+		$logTimestamp = '';
+		if(preg_match('/^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})/',$content,$match)){
+			$logDate = $match[1];
+			// Parse the date and add current year (postfix logs don't include year)
+			$currentYear = date('Y');
+			try {
+				$dateTime = DateTime::createFromFormat('M d H:i:s', $logDate);
+				if($dateTime){
+					$dateTime->setDate($currentYear, $dateTime->format('m'), $dateTime->format('d'));
+					// Check if the date is in the future (happens around year boundary)
+					if($dateTime->getTimestamp() > time()){
+						$dateTime->setDate($currentYear - 1, $dateTime->format('m'), $dateTime->format('d'));
+					}
+					$logTimestamp = $dateTime->format('Y-m-d H:i:s');
+				}
+			} catch(Exception){
+				// If date parsing fails, use current timestamp
+				$logTimestamp = date('Y-m-d H:i:s');
+			}
+		}
+		if(empty($logTimestamp)){
+			$logTimestamp = date('Y-m-d H:i:s');
+		}
+
 		//Get the email address
 		preg_match('/to=<([^>]*)>/',$content,$match);
 		$email = isset($match[1]) ? $match[1] : '';
@@ -293,7 +350,15 @@ function processLogLine($content, $domain_id){
 		preg_match('/(said|refused to talk to me):\s*(.*)$/',$content,$match);
 		$reason = isset($match[2])?$match[2]:'';
 		//Save the result
-		return array('email'=>$email,'status'=>$status, 'dsn'=>$dsn, 'reason'=>$reason, 'relay'=>$relay, 'domainId'=>$domain_id);
+		return array(
+			'email'=>$email,
+			'status'=>$status,
+			'dsn'=>$dsn,
+			'reason'=>$reason,
+			'relay'=>$relay,
+			'domainId'=>$domain_id,
+			'logDate'=>$logTimestamp
+		);
 	}
 	return null;
 }
