@@ -357,7 +357,8 @@ function processLogLine($content, $domain_id){
 			'reason'=>$reason,
 			'relay'=>$relay,
 			'domainId'=>$domain_id,
-			'logDate'=>$logTimestamp
+			'logDate'=>$logTimestamp,
+			'version'=>1
 		);
 	}
 	return null;
