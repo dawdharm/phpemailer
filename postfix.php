@@ -185,15 +185,30 @@ if($lastPos >0){
 }
 //Process the main log file from the last position
 echo "Processing main log file from position ".$lastPos."\n";
+$batch = array();
+$batchSize = 25;
+
 while(!$hdLog->eof()){
 	$content = $hdLog->current();
 	$result = processLogLine($content, $domain_id);
 	if($result){
-		//Post the result to the server
-		postData($apiUrl, $result);
+		// Add to batch
+		$batch[] = $result;
+
+		// Send batch when it reaches the batch size
+		if(count($batch) >= $batchSize){
+			postDataBatch($apiUrl, $batch);
+			$batch = array(); // Reset batch
+		}
 	}
 	$hdLog->next();
 }
+
+// Send remaining logs in batch
+if(count($batch) > 0){
+	postDataBatch($apiUrl, $batch);
+}
+
 //truncate the rem file and Save the read position and file size to the $hd file resource
 fwrite($hd,$fileSize.','.$hdLog->key());
 fclose($hd);
@@ -213,6 +228,47 @@ function postData($url,$data){
 	curl_setopt($ch,CURLOPT_POSTFIELDS,$data);
 	$output = curl_exec($ch);
 	curl_close($ch);
+	return $output;
+}
+
+/**
+ * Send batch of logs to the server
+ * @param $url - Base API URL (will append /logBatch)
+ * @param $batch array of log entries
+ */
+function postDataBatch($url, $batch){
+	if(empty($batch)){
+		return;
+	}
+
+	// Use the logBatch endpoint for batch processing
+	$batchUrl = str_replace('/log', '/logBatch', $url);
+
+	// Prepare the data - need to properly encode nested arrays
+	$postData = http_build_query(array('version' => 3));
+	foreach($batch as $index => $log){
+		foreach($log as $key => $value){
+			$postData .= '&logs['.$index.']['.$key.']='.urlencode($value);
+		}
+	}
+
+	$ch = curl_init();
+	curl_setopt($ch, CURLOPT_URL, $batchUrl);
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+	curl_setopt($ch, CURLOPT_POST, 1);
+	curl_setopt($ch, CURLOPT_POSTFIELDS, $postData);
+	curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+	$output = curl_exec($ch);
+	$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+	curl_close($ch);
+
+	// Log the result
+	if($httpCode >= 200 && $httpCode < 300){
+		echo "Sent batch of ".count($batch)." logs successfully\n";
+	} else {
+		echo "Failed to send batch of ".count($batch)." logs (HTTP ".$httpCode."): ".$output."\n";
+	}
+
 	return $output;
 }
 
@@ -259,6 +315,8 @@ function getRotatedLogFiles($baseLogFile){
 function processLogFile($filePath, $isCompressed, $apiUrl, $domain_id){
 	echo "Processing file: ".$filePath."\n";
 	$count = 0;
+	$batch = array();
+	$batchSize = 25;
 
 	if($isCompressed){
 		// Read compressed file
@@ -272,8 +330,14 @@ function processLogFile($filePath, $isCompressed, $apiUrl, $domain_id){
 			$content = gzgets($gz);
 			$result = processLogLine($content, $domain_id);
 			if($result){
-				postData($apiUrl, $result);
+				$batch[] = $result;
 				$count++;
+
+				// Send batch when it reaches the batch size
+				if(count($batch) >= $batchSize){
+					postDataBatch($apiUrl, $batch);
+					$batch = array();
+				}
 			}
 		}
 		gzclose($gz);
@@ -286,11 +350,22 @@ function processLogFile($filePath, $isCompressed, $apiUrl, $domain_id){
 			$content = $hdLog->current();
 			$result = processLogLine($content, $domain_id);
 			if($result){
-				postData($apiUrl, $result);
+				$batch[] = $result;
 				$count++;
+
+				// Send batch when it reaches the batch size
+				if(count($batch) >= $batchSize){
+					postDataBatch($apiUrl, $batch);
+					$batch = array();
+				}
 			}
 			$hdLog->next();
 		}
+	}
+
+	// Send remaining logs in batch
+	if(count($batch) > 0){
+		postDataBatch($apiUrl, $batch);
 	}
 
 	echo "Found ".$count." bounced/deferred emails in ".$filePath."\n";
@@ -357,8 +432,7 @@ function processLogLine($content, $domain_id){
 			'reason'=>$reason,
 			'relay'=>$relay,
 			'domainId'=>$domain_id,
-			'logDate'=>$logTimestamp,
-			'version'=>2
+			'logDate'=>$logTimestamp
 		);
 	}
 	return null;
