@@ -305,12 +305,12 @@ function getRotatedLogFiles($baseLogFile){
 }
 
 /**
- * Process a log file and extract bounce/deferred email data
+ * Process a log file and extract all postfix delivery status data
  * @param string $filePath - Path to the log file
  * @param bool $isCompressed - Whether the file is gzip compressed
  * @param string $apiUrl - API URL to post data to
  * @param int $domain_id - Domain ID
- * @return int - Number of bounced/deferred emails found
+ * @return int - Number of delivery status entries found
  */
 function processLogFile($filePath, $isCompressed, $apiUrl, $domain_id){
 	echo "Processing file: ".$filePath."\n";
@@ -368,72 +368,101 @@ function processLogFile($filePath, $isCompressed, $apiUrl, $domain_id){
 		postDataBatch($apiUrl, $batch);
 	}
 
-	echo "Found ".$count." bounced/deferred emails in ".$filePath."\n";
+	echo "Found ".$count." postfix log entries in ".$filePath."\n";
 	return $count;
 }
 
 /**
- * Process a single log line and extract bounce/deferred email data
+ * Process a single log line and extract all postfix log data
+ * Captures all postfix service lines: smtp, smtpd, qmgr, cleanup, bounce, local, etc.
  * @param string $content - Log line content
  * @param int $domain_id - Domain ID
- * @return array|null - Extracted data or null if not a bounce/deferred line
+ * @return array|null - Extracted data or null if not a postfix line
  */
 function processLogLine($content, $domain_id){
-	// Look for bounce email log
-	if(preg_match('/status=(bounced|deferred)/',$content)){
-		echo $content."\n";
+	// Match any postfix service log line: postfix/smtp, postfix/smtpd, postfix/qmgr, etc.
+	if(!preg_match('/postfix\/(\w+)\[\d+\]/',$content,$serviceMatch)){
+		return null;
+	}
 
-		//Get the timestamp from the log line (format: Jan 17 14:30:45)
-		$logDate = '';
-		$logTimestamp = '';
-		if(preg_match('/^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})/',$content,$match)){
-			$logDate = $match[1];
-			// Parse the date and add current year (postfix logs don't include year)
-			$currentYear = date('Y');
-			try {
-				$dateTime = DateTime::createFromFormat('M d H:i:s', $logDate);
-				if($dateTime){
-					$dateTime->setDate($currentYear, $dateTime->format('m'), $dateTime->format('d'));
-					// Check if the date is in the future (happens around year boundary)
-					if($dateTime->getTimestamp() > time()){
-						$dateTime->setDate($currentYear - 1, $dateTime->format('m'), $dateTime->format('d'));
-					}
-					$logTimestamp = $dateTime->format('Y-m-d H:i:s');
+	$service = $serviceMatch[1]; // smtp, smtpd, qmgr, cleanup, bounce, local, etc.
+
+	//Get the timestamp from the log line (format: Jan 17 14:30:45)
+	$logTimestamp = '';
+	if(preg_match('/^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})/',$content,$match)){
+		$currentYear = date('Y');
+		try {
+			$dateTime = DateTime::createFromFormat('M d H:i:s', $match[1]);
+			if($dateTime){
+				$dateTime->setDate($currentYear, $dateTime->format('m'), $dateTime->format('d'));
+				if($dateTime->getTimestamp() > time()){
+					$dateTime->setDate($currentYear - 1, $dateTime->format('m'), $dateTime->format('d'));
 				}
-			} catch(Exception){
-				// If date parsing fails, use current timestamp
-				$logTimestamp = date('Y-m-d H:i:s');
+				$logTimestamp = $dateTime->format('Y-m-d H:i:s');
 			}
-		}
-		if(empty($logTimestamp)){
+		} catch(Exception){
 			$logTimestamp = date('Y-m-d H:i:s');
 		}
-
-		//Get the email address
-		preg_match('/to=<([^>]*)>/',$content,$match);
-		$email = isset($match[1]) ? $match[1] : '';
-		//Get the status
-		preg_match('/status=([^\s]*)\s/',$content,$match);
-		$status = isset($match[1]) ? $match[1] : '';
-		//Get the mail dsn code
-		preg_match('/dsn=\s*(\d\.\d\.\d)/',$content,$match);
-		$dsn = isset($match[1])?$match[1]:'';
-		//GET the relay details
-		preg_match('/relay=([^,]*),/',$content,$match);
-		$relay = isset($match[1])?$match[1]:'';
-		//Get the bounce email reason
-		preg_match('/(said|refused to talk to me):\s*(.*)$/',$content,$match);
-		$reason = isset($match[2])?$match[2]:'';
-		//Save the result
-		return array(
-			'email'=>$email,
-			'status'=>$status,
-			'dsn'=>$dsn,
-			'reason'=>$reason,
-			'relay'=>$relay,
-			'domainId'=>$domain_id,
-			'logDate'=>$logTimestamp
-		);
 	}
-	return null;
+	if(empty($logTimestamp)){
+		$logTimestamp = date('Y-m-d H:i:s');
+	}
+
+	// Extract queue ID (hex string like ABCDEF1234)
+	$queueId = '';
+	if(preg_match('/postfix\/\w+\[\d+\]:\s+([A-F0-9]{8,15}):/i',$content,$match)){
+		$queueId = $match[1];
+	}
+
+	// Extract all available fields from the log line
+	$email = '';
+	$fromEmail = '';
+	$status = '';
+	$dsn = '';
+	$relay = '';
+	$reason = '';
+
+	// to= address (delivery lines)
+	if(preg_match('/to=<([^>]*)>/',$content,$match)){
+		$email = $match[1];
+	}
+	// from= address (qmgr lines)
+	if(preg_match('/from=<([^>]*)>/',$content,$match)){
+		$fromEmail = $match[1];
+	}
+	// status (delivery lines)
+	if(preg_match('/status=(\w+)/',$content,$match)){
+		$status = $match[1];
+	}
+	// dsn code
+	if(preg_match('/dsn=\s*(\d\.\d\.\d)/',$content,$match)){
+		$dsn = $match[1];
+	}
+	// relay details
+	if(preg_match('/relay=([^,]*),/',$content,$match)){
+		$relay = $match[1];
+	}
+	// reason/detail
+	if(preg_match('/(said|refused to talk to me):\s*(.*)$/',$content,$match)){
+		$reason = $match[2];
+	} elseif(preg_match('/status=\w+\s+\((.+)\)\s*$/',$content,$match)){
+		$reason = $match[1];
+	}
+
+	// Trim raw log to max 1000 chars to avoid oversized payloads
+	$rawLog = substr(trim($content), 0, 1000);
+
+	return array(
+		'email'=>$email,
+		'fromEmail'=>$fromEmail,
+		'status'=>$status,
+		'dsn'=>$dsn,
+		'reason'=>$reason,
+		'relay'=>$relay,
+		'domainId'=>$domain_id,
+		'logDate'=>$logTimestamp,
+		'queueId'=>$queueId,
+		'service'=>$service,
+		'rawLog'=>$rawLog
+	);
 }
