@@ -59,7 +59,7 @@ $hostname = gethostname() ?: '';
 $ip = gethostbyname($hostname);
 
 $fp = openLogFile($logFile);
-$currentInode = fileInode($logFile);
+$currentInode = getFileInode($logFile);
 $currentOffset = isset($state['offset']) ? (int)$state['offset'] : 0;
 $lastFlushAt = microtime(true);
 
@@ -75,7 +75,7 @@ while (true) {
     drainSpool($spoolDir, $apiUrl);
 
     // Detect rotation by inode change
-    $inodeNow = fileInode($logFile);
+    $inodeNow = getFileInode($logFile);
     if ($inodeNow !== $currentInode) {
         fclose($fp);
         $fp = openLogFile($logFile);
@@ -167,7 +167,7 @@ function openLogFile(string $path) {
     return $fp;
 }
 
-function fileInode(string $path): int {
+function getFileInode(string $path): int {
     $st = @stat($path);
     return is_array($st) && isset($st['ino']) ? (int)$st['ino'] : 0;
 }
