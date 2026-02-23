@@ -16,6 +16,7 @@ if (file_exists($domainIdFile)) {
 }
 
 $apiUrl = 'https://ingest.pay-per-lead.co.uk/postfix/logBatch';
+/*
 $apiConfigFile = __DIR__ . '/api_config.json';
 if (file_exists($apiConfigFile)) {
     $apiConfig = json_decode(file_get_contents($apiConfigFile), true);
@@ -28,7 +29,7 @@ if (file_exists($apiConfigFile)) {
             $apiUrl = $apiUrl . '/logBatch';
         }
     }
-}
+}*/
 
 $logFile = '';
 if (file_exists(ROOT_LOG_DIR.'mail.log')) {
