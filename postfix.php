@@ -92,7 +92,10 @@ while (true) {
 
     $line = fgets($fp);
     if ($line === false) {
-        // No new data
+        // Clear PHP's EOF internal flag so fgets() can see newly appended data
+        clearstatcache(true, $logFile);
+        fseek($fp, ftell($fp));
+
         usleep($pollSleepUs);
 
         // Still flush if time exceeded and we have a batch
