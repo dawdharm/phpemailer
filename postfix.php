@@ -48,6 +48,7 @@ $spoolDir = __DIR__ . '/spool';
 $batchMax = 500;            // Increase from 25 to reduce HTTP overhead
 $flushEverySeconds = 2.0;   // Time based flush to smooth bursts
 $pollSleepUs = 250000;      // 0.25s
+$heartbeatSeconds = 30;     // Print status every 30s when idle
 
 if (!is_dir($spoolDir)) {
     mkdir($spoolDir, 0775, true);
@@ -70,6 +71,9 @@ echo "Polling: {$logFile}\n";
 echo "API: {$apiUrl}\n";
 
 $batch = [];
+$lastHeartbeat = microtime(true);
+$totalSent = 0;
+$linesRead = 0;
 
 while (true) {
     // Try to send any spooled failed batches first
@@ -94,12 +98,28 @@ while (true) {
         // Still flush if time exceeded and we have a batch
         if (!empty($batch) && (microtime(true) - $lastFlushAt) >= $flushEverySeconds) {
             flushBatch($batch, $apiUrl, $spoolDir);
+            $totalSent += count($batch);
             $batch = [];
             $lastFlushAt = microtime(true);
+
+            // Save state after flush
+            saveState($stateFile, [
+                'inode' => $currentInode,
+                'offset' => $currentOffset,
+                'updated_at' => date('c'),
+            ]);
+        }
+
+        // Heartbeat: show we're alive when idle
+        if ((microtime(true) - $lastHeartbeat) >= $heartbeatSeconds) {
+            echo "[" . date('H:i:s') . "] Waiting for new log lines... (sent: {$totalSent}, read: {$linesRead}, pending: " . count($batch) . ")\n";
+            $lastHeartbeat = microtime(true);
         }
 
         continue;
     }
+
+    $linesRead++;
 
     $currentOffset = ftell($fp);
 
@@ -117,16 +137,17 @@ while (true) {
 
     if ($shouldFlushSize || $shouldFlushTime) {
         flushBatch($batch, $apiUrl, $spoolDir);
+        $totalSent += count($batch);
         $batch = [];
         $lastFlushAt = microtime(true);
-    }
 
-    // Persist state frequently so a restart is cheap
-    saveState($stateFile, [
-        'inode' => $currentInode,
-        'offset' => $currentOffset,
-        'updated_at' => date('c'),
-    ]);
+        // Only save state after a successful flush so no entries are lost on restart
+        saveState($stateFile, [
+            'inode' => $currentInode,
+            'offset' => $currentOffset,
+            'updated_at' => date('c'),
+        ]);
+    }
 }
 
 function acquireLock(string $lockFile): void {
